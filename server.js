@@ -2,7 +2,6 @@ const express = require('express');
 const app = express();
 const socket = require('socket.io');
 const puppeteer = require('puppeteer');
-const nodemailer = require('nodemailer');
 const PORT = process.env.PORT || 5000;
 
 const server = app.listen(PORT, () => {
@@ -203,7 +202,6 @@ async function executeAuto(data, url) {
     autoScan = false;
     await browser.close();
     io.emit('result', { msg: `${time}: Auto Checkout Successfully: ${url}` });
-    sendMail(data, url);
   } catch (error) {
     io.emit('result', { msg: 'Error from Target.com' });
     console.log(error);
@@ -214,35 +212,4 @@ async function executeAuto(data, url) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function sendMail(data, url) {
-  var transport = nodemailer.createTransport({
-    service: 'gmail',
-    host: 'smtp.gmail.com',
-    port: 587,
-    auth: {
-      user: 'baolongtranfifa2@gmail.com',
-      pass: 'Angiday4680?',
-    },
-    secure: 'false',
-    tls: {
-      rejectUnauthorized: false,
-    },
-  });
-
-  var mailOptions = {
-    from: 'baolongtranfifa2@gmail.com',
-    to: 'baolongtran512@gmail.com',
-    subject: 'Ps5 Checkout Successfully',
-    text: `User: ${data.cardName} 
-    Checkout ${url} -- successfully`,
-  };
-
-  transport.sendMail(mailOptions, (error, info) => {
-    if (error) {
-      return console.log(error);
-    }
-    console.log('Message sent: %s', info.messageId);
-  });
 }
