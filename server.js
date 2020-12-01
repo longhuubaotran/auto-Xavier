@@ -3,6 +3,7 @@ const app = express();
 const socket = require('socket.io');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const UserAgent = require('user-agents');
 const PORT = process.env.PORT || 5000;
 
 puppeteer.use(StealthPlugin());
@@ -21,9 +22,13 @@ io.on('connection', async (socket) => {
 
     autoScan = data.autoScan;
     while (autoScan) {
-      await executeAuto(data, data.links[0]);
+      try {
+        await executeAuto(data, data.links[0]);
+      } catch (error) {
+        console.log(error);
+      }
       console.log(autoScan, 'AutoScan');
-      await sleep(35000);
+      await sleep(40000);
     }
   });
 
@@ -38,7 +43,6 @@ io.on('connection', async (socket) => {
 
 async function executeAuto(data, url) {
   const time = new Date().toLocaleString();
-  let pickupOp = true;
   const browser = await puppeteer.launch({
     headless: true,
     args: [
@@ -49,11 +53,16 @@ async function executeAuto(data, url) {
       '--disable-gpu',
       '--proxy-server="direct://"',
       '--proxy-bypass-list=*',
+      '--window-size=1920,1080',
     ],
+    defaultViewport: null,
   });
   ///
   try {
+    const userAgent = new UserAgent();
     const page = await browser.newPage();
+
+    await page.setDefaultTimeout(9000000);
 
     const blockedResourceTypes = [
       'image',
@@ -88,6 +97,7 @@ async function executeAuto(data, url) {
     ];
 
     await page.setRequestInterception(true);
+    await page.setUserAgent(userAgent.toString());
     page.on('request', (request) => {
       const requestUrl = request._url.split('?')[0].split('#')[0];
       if (
@@ -100,102 +110,61 @@ async function executeAuto(data, url) {
       }
     });
 
-    await page.goto(url);
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-test="storeFulfillmentAggregator"]');
-
-    await page.waitForSelector(
-      '.Link__StyledLink-zyll5o-0.ggRyRP.h-text-sm.h-text-underline'
-    );
-    await page.click(
-      '.Link__StyledLink-zyll5o-0.ggRyRP.h-text-sm.h-text-underline'
+    const orderBtn = await page.$$(
+      '[data-tl-id="ProductPrimaryCTA-cta_add_to_cart_button"]'
     );
 
-    await page.waitForSelector('[data-test="storeSearchLink"]');
-    await page.click('[data-test="storeSearchLink"]');
-    const location = await page.$('[data-test="fiatsLocationInput"]');
-    await location.click({ clickCount: 3 });
-    await location.type(`${data.zipcode}`);
-    await page.click('[data-test="fiatsUpdateLocationSubmitButton"]');
-    await sleep(1000);
-    const availableItems = await page.$$('[data-test="pickUpHereFIATS"]');
-
-    if (availableItems.length === 0) {
+    if (orderBtn.length === 0) {
       io.emit('result', { msg: `${time}: Not Found: ${url}` });
       await browser.close();
       autoScan = true;
       return;
-    }
-    await availableItems[availableItems.length - 1].click();
-
-    await page.waitForSelector('[data-test="addToCartModal"]');
-
-    const declineBtn = await page.$(
-      '[data-test="espModalContent-declineCoverageButton"]'
-    );
-
-    if (declineBtn && declineBtn.textContent !== '') {
-      await page.click('[data-test="espModalContent-declineCoverageButton"]');
-    }
-
-    await page.click('[data-test="addToCartModalViewCartCheckout"]');
-
-    await page.waitForSelector('[id="checkout-spinner"]', {
-      hidden: true,
-    });
-    // Go to checkout
-    await page.waitForSelector('[data-test="checkout-button"]');
-    await page.click('[data-test="checkout-button"]');
-
-    // Login
-    await page.waitForSelector('[id="username"]', { visible: true });
-    await page.focus('[id="username"]');
-    await page.keyboard.type(data.email);
-
-    await page.focus('[id="password"]');
-    await page.keyboard.type(data.password);
-
-    await page.click('[id="login"]');
-
-    await page.waitForSelector('[id="checkout-spinner"]', {
-      hidden: true,
-    });
-
-    if (pickupOp) {
-      // Check out
-      await page.waitForSelector('[id="creditCardInput-cvv"]');
-      await page.type('[id="creditCardInput-cvv"]', `${data.ccv}`);
-      await page.waitForSelector('[data-test="placeOrderButton"]');
-      await page.click('[data-test="placeOrderButton"]');
     } else {
-      // await page.waitForSelector('[data-test="payment-credit-card-section"]', {
-      //   visible: true,
-      // });
-      // const addNewCard = await page.$(
-      //   '[data-test="add-new-credit-card-button"]'
-      // );
-      // if (addNewCard && addNewCard.textContent !== '') {
-      //   await page.waitForSelector('[id="creditCardInput-cardNumber"]');
-      //   await page.type('[id="creditCardInput-cardNumber"]', `${data.cardNum}`);
-      //   await page.click('[data-test="verify-card-button"]');
-      //   await page.waitForSelector('[id="creditCardInput-cvv"]');
-      //   await page.type('[id="creditCardInput-cvv"]', `${data.ccv}`);
-      // }
-      // await page.click('[data-test="save-and-continue-button"]');
-      // await page.waitForSelector('[id="checkout-spinner"]', {
-      //   hidden: true,
-      // });
-      // await page.waitForSelector('[data-test="placeOrderButton"]');
-      // await page.click('[data-test="placeOrderButton"]');
+      await orderBtn[0].click();
     }
+    await sleep(500);
+    await page.waitForSelector('[data-tl-id="IPPacCheckOutBtnBottom"]');
+    await page.click('[data-tl-id="IPPacCheckOutBtnBottom"]');
 
-    await sleep(4000);
+    await page.waitForSelector('[tealeafid="signin-email-input"]', {
+      visible: true,
+    });
+    await page.focus('[tealeafid="signin-email-input"]');
+    await page.keyboard.type(data.email);
+    // await sleep(500);
+    await page.focus('[data-automation-id="signin-password-input"]');
+    await page.keyboard.type(data.password);
+    await sleep(500);
+    await page.click('[data-automation-id="signin-submit-btn"]');
+    // await sleep(500);
+    await page.waitForSelector('[data-automation-id="fulfillment-continue"]');
+    await page.click('[data-automation-id="fulfillment-continue"]');
+    // await sleep(500);
+    await page.waitForSelector(
+      '[data-automation-id="address-book-action-buttons-on-continue"]'
+    );
+    await page.click(
+      '[data-automation-id="address-book-action-buttons-on-continue"]'
+    );
+    // await sleep(500);
+    await page.waitForSelector('[data-automation-id="cvv-verify-cc-0"]');
+    await page.type('[data-automation-id="cvv-verify-cc-0"]', `${data.ccv}`);
+    // await sleep(500);
+    await page.waitForSelector('[data-automation-id="submit-payment-cc"]');
+    await page.click('[data-automation-id="submit-payment-cc"]');
+
+    await page.waitForSelector('[data-automation-id="summary-place-holder"]');
+    await page.click('[data-automation-id="summary-place-holder"]');
+
+    await sleep(2000);
     await browser.close();
     autoScan = false;
     io.emit('result', { msg: `${time}: Auto Checkout Successfully: ${url}` });
     return;
   } catch (error) {
-    io.emit('result', { msg: 'Error from Target.com' });
+    io.emit('result', { msg: 'Not response from Walmart' });
     console.log(error);
     autoScan = true;
     return;
